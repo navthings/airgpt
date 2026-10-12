@@ -2,15 +2,52 @@
 
 train your own chatbot from scratch on a mac.
 
+<!-- demo -->
+
 ```bash
 python train.py --preset hour
 ```
 
-that downloads some data, trains a tokenizer, pretrains a tiny llama-style model, teaches it to chat, then lets you talk to it. while it trains it shows a sample from the model every few minutes, so you can watch it go from gibberish to stories. it runs for however long you tell it to, so the `hour` preset takes an hour whether you're on a macbook air or a mac studio. no cuda, no cloud, nothing on top of [mlx](https://github.com/ml-explore/mlx).
+that downloads some data, trains a tokenizer, pretrains a tiny llama-style model, teaches it to chat, then lets you talk to it. it runs for however long you tell it to, so `hour` takes an hour on a macbook air or a mac studio, the studio just gets further. no cuda, no cloud, nothing on top of [mlx](https://github.com/ml-explore/mlx).
 
 i made this because every "train your own llm" repo i found wanted an nvidia gpu, and i have a fanless macbook air.
 
-<!-- plot from a real run goes here -->
+## what an hour gets you
+
+on my macbook air (m5, 16gb) the `hour` preset trained an 8M parameter model on 55M tokens. every two minutes it samples the model with the same prompt, so you can watch it learn to write:
+
+| | val loss | "Once upon a time" |
+|---|---|---|
+| 2 min | 4.09 | , there was a little boy named Tim. Timmy loved to play with his friends. One day, Timmy was a very excited. |
+| 6 min | 3.15 | , there was a little girl named Lily. She had a big red dress that she loved to play with. One day, Lily went to a party with her mom. |
+| 46 min | 2.27 | , there was a little girl named Lily. She loved to play with her toys and her favorite toy was a big, red ball. One day, Lily's mom asked her to help |
+
+and the finished pretrained model carrying on from "Once upon a time" (`python chat.py runs/hour --base`):
+
+> Once upon a time, there was a little girl named Lily. She loved to play with her toys and her favorite was a big, red ball. One day, Lily's mom gave her a special gift for her dad. She took out a big box and showed it to her mom.
+>
+> "Look, Mommy! I found a shiny car!" Lily exclaimed.
+>
+> "Wow, Lily! That car is so cool!" her mom said.
+
+the last 12 minutes teach it to chat. at 8M params it picks up the shape of a conversation and not much else. first tries, unedited:
+
+```
+> hi!
+Hello! How can I help you today?
+
+> what is the capital of france?
+The capital of france is the capital of the france of the tech of decimal.
+
+> how do i make friends at a new school?
+Certainly! i made sense to the school students in the classroom. The school students were interested in learning and learning, and then they would love to discuss each other's work and make a team of friends.
+```
+
+<!-- night -->
+
+![loss and speed over the hour run](assets/hour.png)
+
+it never got hot. the thermal state stayed at nominal for the whole hour and speed sat around 20k tokens/s. the dips in the speed line are where it stops to evaluate and write a sample.
 
 ## run it
 
@@ -27,7 +64,7 @@ python chat.py runs/hour
 
 ## what it's actually doing
 
-first it streams text from [tinystories](https://huggingface.co/datasets/roneneldan/TinyStories) and [cosmopedia](https://huggingface.co/datasets/HuggingFaceTB/smollm-corpus). tinystories is simple english written for small models, which is most of the reason an 8M param model can write real sentences after an hour.
+first it streams text from [tinystories](https://huggingface.co/datasets/roneneldan/TinyStories) and [cosmopedia](https://huggingface.co/datasets/HuggingFaceTB/smollm-corpus). tinystories is simple english written for small models, which is most of the reason an 8M param model can write real sentences after a few minutes.
 
 then it trains its own byte-level bpe tokenizer (`tokenizer.py`). it starts with the 256 possible bytes and keeps merging the most common pair until it has 8192 tokens. no tiktoken, no hugging face tokenizers.
 
@@ -41,21 +78,39 @@ the learning rate runs off the clock instead of a step count: warmup for the fir
 
 | preset | params | layers × width | context | time | data |
 |---|---|---|---|---|---|
-| `smoke` | 0.7M | 2 × 128 | 128 | 3 min | 2M tokens |
+| `smoke` | 0.7M | 2 × 128 | 128 | 3 min | 2.5M tokens |
 | `hour` | 8.0M | 8 × 256 | 512 | 1 hour | 60M tokens |
-| `night` | 39.6M | 12 × 512 | 1024 | 8 hours | 400M tokens |
+| `night` | 39.6M | 12 × 512 | 1024 | 8 hours | 150M tokens |
 
-all three fit in 16gb. `--minutes 30` changes the time, and 80% of it goes to pretraining, 20% to chat.
+all three fit in 16gb (the hour run peaked at 5.8gb). `--minutes 30` changes the time, and 80% of it goes to pretraining, 20% to chat.
 
 the first run of each preset spends a few minutes downloading and tokenizing before training starts. after that it reuses `data/<preset>`.
 
-## results
+## how fast is your mac?
 
-| mac | preset | tokens seen | val loss (pretrain) | val loss (chat) | speed start → end |
-|---|---|---|---|---|---|
-| macbook air m5, 16gb | `hour` | | | | |
+```bash
+python bench.py
+```
 
-every run writes `runs/<preset>/summary.json`. if you run it on a different mac, open an issue with yours and i'll add it.
+two minutes, nothing to download. it trains the `hour` model on random tokens and prints your speed, how much it dropped by the end, and a row for this table. open a pr with yours.
+
+| mac | chip | memory | preset | tok/s | after 2 min | thermal |
+|---|---|---|---|---|---|---|
+<!-- bench rows -->
+
+## speedrun
+
+lowest val loss from one hour of training, with records kept per chip. the m5 air number is the one to beat. if nobody's posted your chip yet, any run is a record.
+
+- `python train.py --preset hour` on the `data/hour` that `prepare.py` makes. don't change `prepare.py` or the eval.
+- 48 minutes of pretraining on train.py's clock, same as the preset. data prep doesn't count.
+- everything else is fair game: the model, the optimizer, the schedule, the batch size.
+- the score is `pretrain.val_loss` in `runs/hour/summary.json`.
+- open a pr adding your row, with your `summary.json` and `log.jsonl` and a sentence on what you changed.
+
+| chip | val loss | who | what changed |
+|---|---|---|---|
+| m5 (macbook air, 16gb) | 2.265 | [@navthings](https://github.com/navthings) | baseline |
 
 ## your own data
 
@@ -72,7 +127,7 @@ python train.py --preset hour --text book.txt --chat my_chats.jsonl
 
 ## stuff to know
 
-macbook airs have no fan, so they slow down once they heat up. the trainer reads macos's thermal state and prints your speed against the first couple of minutes (`-18% vs start`). if it ever hits critical it saves and cools off for 30 seconds. `plot.py` marks the hot parts in red.
+macbook airs have no fan. the trainer reads macos's thermal state, shows it while it trains and logs it, and if it ever hits critical it saves and pauses for 30 seconds. `plot.py` marks any hot stretches in the speed chart.
 
 it makes things up. 8M params is enough to learn english, not facts.
 
@@ -93,9 +148,11 @@ ctrl-c saves and prints the exact command to carry on, clock included. it also c
 | `tokenizer.py` | byte-level bpe |
 | `prepare.py` | downloads, tokenizes and packs the data |
 | `chat.py` | talk to it |
+| `bench.py` | 2 minute speed test |
 | `config.py` | presets |
 | `mac.py` | chip, memory, fanless check, thermal state |
 | `plot.py` | loss and speed charts |
+| `ui.py` | the terminal output |
 
 ## credits
 

@@ -221,6 +221,9 @@ def run_phase(phase: str, minutes: float, peak: float, model, data: Data, tok: T
                 log_line(out, {**row, "sample": text})
                 live.say(f"{ui.clock(elapsed):>7}  {v:.3f}  " + ui.dim(ui.clip(prefix + text, ui.width() - 17)))
                 next_row += row_every
+                # don't count the eval pause in the speed
+                recent.clear()
+                recent.append((time.time(), progress["tokens"]))
 
             if now - last_ckpt >= 600:
                 progress["elapsed"] = time.time() - start
