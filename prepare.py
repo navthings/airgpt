@@ -150,15 +150,13 @@ def prepare(cfg: Config, out: Path, text: str | None = None, chat: str | None = 
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     live = ui.Live()
-    print(f"\n{ui.bold('data')}  {ui.dim('first run of this preset, later runs reuse ' + str(out))}\n")
-
+    print(f"\n{ui.bold('making')} {out}")
     if text:
         docs = local_text(text)
-        print(ui.label("source", text))
+        print(f"source: {text}")
     else:
         docs = mixed(cfg.mix)
-        print(ui.label("source", " · ".join(f"{k} {v:.0%}" for k, v in cfg.mix.items())
-                       + ui.dim("   streamed from hugging face")))
+        print("source: " + ", ".join(f"{k} {v:.0%}" for k, v in cfg.mix.items()) + " (hugging face)")
 
     val_tokens = max(cfg.ctx * 64, cfg.pretrain_tokens // 200)
     want = val_tokens * 4 + min(20_000_000, cfg.pretrain_tokens * 2)
@@ -166,24 +164,25 @@ def prepare(cfg: Config, out: Path, text: str | None = None, chat: str | None = 
 
     def downloaded(n):
         got[0] += n
-        live.show(ui.label("download", f"{ui.bar(got[0] / want)}  {ui.num(got[0])} / {ui.num(want)} characters"))
+        if live.due():
+            live.show(f"download   {ui.bar(got[0] / want, 30)} {ui.num(got[0])}/{ui.num(want)} chars")
 
     val_docs = take_chars(docs, val_tokens * 4, downloaded)
     tok_docs = take_chars(docs, want - val_tokens * 4, downloaded)
-    live.done(ui.label("download", f"{ui.num(got[0])} characters for the tokenizer and validation"))
+    live.done(f"downloaded {ui.num(got[0])} chars")
 
     t = time.time()
-    live.show(ui.label("tokenizer", ui.dim("counting words...")), force=True)
-    tok = Tokenizer.train(tok_docs, cfg.vocab, lambda done, total: live.show(
-        ui.label("tokenizer", f"{ui.bar(done / total)}  {done:,} / {total:,} merges")))
+    live.show("tokenizer  counting words")
+    tok = Tokenizer.train(tok_docs, cfg.vocab, lambda done, total: live.due() and live.show(
+        f"tokenizer  {ui.bar(done / total, 30)} {done}/{total} merges"))
     tok.save(str(out / "tokenizer.json"))
-    live.done(ui.label("tokenizer", f"{len(tok.merges) + 256 + len(SPECIALS):,} tokens learned in {time.time() - t:.0f}s"))
+    live.done(f"tokenizer: {len(tok.merges) + 256 + len(SPECIALS)} tokens in {time.time() - t:.0f}s")
 
     with Pool(initializer=_init, initargs=(str(out / "tokenizer.json"),)) as pool:
         val = np.array([i for ids in pool.imap(_enc_doc, val_docs, chunksize=16) for i in ids], dtype=np.uint16)
         val.tofile(out / "val.bin")
         bytes_per_token = sum(len(d.encode()) + 1 for d in val_docs) / len(val)
-        print(ui.label("validation", f"{ui.num(len(val))} tokens held out · {bytes_per_token:.2f} bytes per token"))
+        print(f"val: {ui.num(len(val))} tokens, {bytes_per_token:.2f} bytes/token")
 
         n, t = 0, time.time()
         with open(out / "train.bin", "wb") as f:
@@ -193,11 +192,11 @@ def prepare(cfg: Config, out: Path, text: str | None = None, chat: str | None = 
                     np.array(ids, dtype=np.uint16).tofile(f)
                     n += len(ids)
                 rate = n / max(time.time() - t, 1e-9)
-                live.show(ui.label("tokenize", f"{ui.bar(n / cfg.pretrain_tokens)}  {ui.num(n)} / "
-                                   f"{ui.num(cfg.pretrain_tokens)} tokens   {ui.num(rate)}/s   {ui.clock(time.time() - t)}"))
+                live.show(f"tokenizing {ui.bar(n / cfg.pretrain_tokens, 30)} {ui.num(n)}/{ui.num(cfg.pretrain_tokens)}"
+                          f" tokens, {ui.num(rate)}/s")
                 if n >= cfg.pretrain_tokens:
                     break
-        live.done(ui.label("tokenize", f"{ui.num(n)} training tokens in {ui.clock(time.time() - t)}"))
+        live.done(f"train: {ui.num(n)} tokens in {ui.clock(time.time() - t)}")
 
         if chat or not text:
             if chat:
@@ -206,8 +205,8 @@ def prepare(cfg: Config, out: Path, text: str | None = None, chat: str | None = 
                 everyday = list(hf_stream("everyday"))
                 # tiny models can only learn short chats, so keep the short ones
                 short = (m for m in hf_stream("smoltalk") if sum(len(x["content"]) for x in m) < cfg.ctx * 3)
-                found = take_n(short, cfg.sft_convos, lambda k: live.show(ui.label(
-                    "chat", f"{ui.bar(k / cfg.sft_convos)}  {k:,} / {cfg.sft_convos:,} short conversations")))
+                found = take_n(short, cfg.sft_convos, lambda k: live.due() and live.show(
+                    f"chat       {ui.bar(k / cfg.sft_convos, 30)} {k}/{cfg.sft_convos} conversations"))
                 convos = everyday * 2 + found
             random.Random(seed).shuffle(convos)
             encoded = pool.map(_enc_chat, convos, chunksize=64)
@@ -217,13 +216,13 @@ def prepare(cfg: Config, out: Path, text: str | None = None, chat: str | None = 
             np.save(out / "sft_m.npy", m[n_val:])
             np.save(out / "sft_val_x.npy", x[:n_val])
             np.save(out / "sft_val_m.npy", m[:n_val])
-            live.done(ui.label("chat", f"{len(convos):,} conversations packed into {len(x):,} rows"))
+            live.done(f"chat: {len(convos)} conversations -> {len(x)} rows")
 
     meta = {"vocab": cfg.vocab, "ctx": cfg.ctx, "train_tokens": n, "val_tokens": len(val),
             "bytes_per_token": bytes_per_token, "chat": bool(chat or not text),
             "source": text or cfg.mix, "minutes_to_prepare": round((time.time() - t0) / 60, 1)}
     (out / "meta.json").write_text(json.dumps(meta, indent=2))
-    print(ui.label("ready", f"{ui.clock(time.time() - t0)} {ui.dim('->')} {out}"))
+    print(f"data ready in {ui.clock(time.time() - t0)}")
     return meta
 
 

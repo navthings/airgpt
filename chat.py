@@ -72,12 +72,11 @@ def main():
             import readline  # noqa: F401  arrow keys and history in input()
         except ImportError:
             pass
-        kind = "base model, it continues whatever you type" if args.base else "/reset to start over · ctrl-c to quit"
-        print(f"\n{ui.bold('airgpt')}  {ui.dim(f'{run} · {ui.num(count_params(model))} parameters')}")
-        print(ui.dim(f"temperature {args.temp} · min-p {args.min_p} · {kind}\n"))
+        n = count_params(model)
+        print(f"\n{ui.bold('airgpt')} {run} ({n / 1e6:.2f}M params, temp {args.temp}, min-p {args.min_p})")
+        print(ui.dim("base model, it continues whatever you type" if args.base else "/reset clears the chat, ctrl-c quits") + "\n")
 
-    you = ui.readline_safe(ui.bold("you") + ui.dim(" › "))
-    bot = ui.cyan("airgpt") + ui.dim(" › ")
+    you = ui.readline_safe(ui.dim("> "))
 
     if args.base:
         while True:
@@ -86,7 +85,7 @@ def main():
             except (KeyboardInterrupt, EOFError):
                 print()
                 return
-            sys.stdout.write(bot + ui.dim(text))
+            sys.stdout.write(ui.dim(text))
             stream(model, tok, [tok.end] + tok.encode(text), cfg.ctx, args)
             if args.prompt:
                 return
@@ -101,12 +100,11 @@ def main():
             return
         if msg.strip() == "/reset":
             history = [tok.end]
-            print(ui.dim("  (cleared)\n"))
+            print(ui.dim("cleared\n"))
             continue
         if not msg.strip():
             continue
         history += [tok.user] + tok.encode(msg) + [tok.assistant]
-        sys.stdout.write(bot)
         reply = stream(model, tok, history, cfg.ctx, args)
         history += reply + [tok.end]
         if args.prompt:

@@ -62,7 +62,7 @@ def main():
 
     hw = summary.get("hardware", {})
     params = summary.get("params")
-    sub = " · ".join(x for x in [hw.get("model"), hw.get("chip"), f"{hw['ram_gb']} GB" if hw else None,
+    sub = ", ".join(x for x in [hw.get("model"), hw.get("chip"), f"{hw['ram_gb']} GB" if hw else None,
                                  f"{params / 1e6:.1f}M params" if params else None,
                                  f"{cfg['minutes']:.0f} min"] if x)
     fig.suptitle("airgpt", x=0.065, y=0.985, ha="left", fontsize=14, fontweight="bold", color=INK)

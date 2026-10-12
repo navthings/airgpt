@@ -100,7 +100,35 @@ def log_line(out: Path, row: dict):
         f.write(json.dumps(row) + "\n")
 
 
-TABLE = f"  {'time':>7}  {'step':>8}  {'loss':>7}  {'val':>7}  {'tok/s':>7}  {'':>5}  {'thermal':<8}  {'memory':>7}"
+class Panel:
+    """The live block at the bottom: progress, numbers, a loss curve and the latest sample."""
+
+    def __init__(self, name: str, total: float, color):
+        self.name, self.total, self.color = name, total, color
+        self.w = min(ui.width() - 8, 72)
+        self.sums, self.counts = [0.0] * (self.w * 2), [0] * (self.w * 2)
+        self.sample, self.val, self.live = "", None, ui.Live()
+
+    def add(self, elapsed: float, loss: float):
+        b = min(int(elapsed / self.total * len(self.sums)), len(self.sums) - 1)
+        self.sums[b] += loss
+        self.counts[b] += 1
+
+    def draw(self, elapsed: float, loss: float, speed: float, vs: str, step: int, th):
+        rows, lo, hi = ui.chart([(i, s / c) for i, (s, c) in enumerate(zip(self.sums, self.counts)) if c], self.w, 3)
+        val = f"val {self.val:.3f}" if self.val is not None else ""
+        lines = [
+            f"{self.name:<8} {ui.bar(elapsed / self.total, max(min(ui.width() - 23, self.w), 10), self.color)} "
+            f"{ui.clock(elapsed)}/{ui.clock(self.total)}",
+            ui.fit([f"loss {loss:.3f}", val, f"{ui.num(speed)} tok/s{vs}", f"step {step}", ui.thermal(th)]),
+            "",
+            f"{hi:>7.2f} {self.color(rows[0])}" if hi else "",
+            f"{'':>7} {self.color(rows[1])}",
+            f"{lo:>7.2f} {self.color(rows[2])}" if lo else "",
+            "",
+            ui.dim(ui.clip("> " + self.sample, ui.width() - 2)) if self.sample else "",
+        ]
+        self.live.show(lines)
 
 
 def run_phase(phase: str, minutes: float, peak: float, model, data: Data, tok: Tokenizer, out: Path,
@@ -122,23 +150,22 @@ def run_phase(phase: str, minutes: float, peak: float, model, data: Data, tok: T
         opt.update(model, grads)
         return loss
 
-    name, what = ("pretrain", "reading text, learning to predict the next token") if phase == "pretrain" else \
-                 ("chat", "learning to answer as the assistant")
-    resumed = f", resuming at {ui.clock(progress['elapsed'])}" if progress["elapsed"] else ""
-    print(f"\n{ui.bold(name)}  {ui.dim(f'{minutes:.0f} min · {what}{resumed}')}\n")
+    name = "pretrain" if phase == "pretrain" else "chat"
+    print(f"\n{ui.bold(name)}" + (ui.dim(f"  resuming at {ui.clock(progress['elapsed'])}") if progress["elapsed"] else ""))
     if phase == "sft":
-        print(f"  {ui.dim('every row asks it:')} {CHAT_PROBE}\n")
-    print(ui.dim(TABLE))
+        print(ui.dim(f'asking "{CHAT_PROBE}" at each checkpoint'))
 
     next_batch = data.sft if phase == "sft" else data.pretrain
     total = minutes * 60
-    row_every = max(20.0, total / 24)
+    row_every = max(10.0, total / 24)
     start = time.time() - progress["elapsed"]
     next_row = progress["elapsed"] + row_every
     last_log = last_ckpt = time.time()
     recent = deque([(time.time(), progress["tokens"])], maxlen=64)
-    speeds, baseline, losses, row_losses = [], None, [], []
-    speed, th, live = 0.0, mac.thermal(), ui.Live()
+    speeds, baseline, losses, shown = [], None, [], deque(maxlen=50)
+    speed, th, vs = 0.0, mac.thermal(), ""
+    panel = Panel(name, total, ui.cyan if phase == "pretrain" else ui.magenta)
+    live = panel.live
 
     try:
         while (elapsed := time.time() - start) < total:
@@ -146,8 +173,10 @@ def run_phase(phase: str, minutes: float, peak: float, model, data: Data, tok: T
             x, y, m = next_batch()
             loss = step(x, y, m)
             mx.eval(state, loss)
-            losses.append(loss.item())
-            row_losses.append(losses[-1])
+            l = loss.item()
+            losses.append(l)
+            shown.append(l)
+            panel.add(elapsed, l)
             progress["step"] += 1
             progress["tokens"] += x.size
 
@@ -161,44 +190,36 @@ def run_phase(phase: str, minutes: float, peak: float, model, data: Data, tok: T
             if now - last_log >= 10:
                 th = mac.thermal()
                 speeds.append((elapsed, speed))
-                # speed over the first two minutes is the baseline, before a fanless chassis heats up
+                # the first two minutes are the baseline speed, before a fanless mac heats up
                 if baseline is None and elapsed > 120:
                     baseline = float(np.median([s for t, s in speeds if t > 20]))
+                if baseline:
+                    pct = speed / baseline - 1
+                    vs = f" ({pct:+.0%})"
+                    vs = ui.red(vs) if pct < -0.25 else ui.yellow(vs) if pct < -0.1 else ui.dim(vs)
                 log_line(out, {"phase": phase, "min": round(elapsed / 60, 3), "step": progress["step"],
                                "loss": round(float(np.mean(losses)), 4), "lr": opt.learning_rate.item(),
                                "tok_s": round(speed), "thermal": th, "mem_gb": round(mx.get_peak_memory() / 1e9, 2)})
                 losses, last_log = [], now
                 if th == 3:
-                    live.say("  " + ui.red("thermal state critical, saving and cooling off for 30s"))
+                    live.say(ui.red("thermal critical, saving and pausing for 30s"))
                     progress["elapsed"] = elapsed
                     save(out, model, opt, progress)
                     time.sleep(30)
                     start += 30
 
-            if now - live.last > 0.1:
-                live.show(ui.fit([f"  {ui.bar(elapsed / total)}", f"{ui.clock(elapsed)} / {ui.clock(total)}",
-                                  f"loss {np.mean(row_losses[-50:]):.3f}", f"{ui.num(speed)} tok/s",
-                                  ui.thermal(th), f"step {progress['step']:,}"]))
+            if live.due():
+                panel.draw(elapsed, float(np.mean(shown)), speed, vs, progress["step"], th)
 
             if elapsed >= next_row:
                 v = evaluate(model, data, phase)
                 text = preview(model, tok, prompt, data.cfg.ctx)
+                panel.val, panel.sample = v, prefix + text
                 row = {"phase": phase, "min": round(elapsed / 60, 3), "val_loss": round(v, 4)}
                 if phase == "pretrain":
                     row["val_bpb"] = round(v / math.log(2) / data.meta["bytes_per_token"], 4)
                 log_line(out, {**row, "sample": text})
-                vs = ""
-                if baseline:
-                    pct = speed / baseline - 1
-                    vs = f"{pct:+.0%}".rjust(5)
-                    vs = ui.red(vs) if pct < -0.25 else ui.yellow(vs) if pct < -0.1 else ui.dim(vs)
-                else:
-                    vs = " " * 5
-                live.say(f"  {ui.clock(elapsed):>7}  {progress['step']:>8,}  {np.mean(row_losses):>7.3f}  "
-                         f"{ui.bold(f'{v:>7.3f}')}  {ui.num(speed):>7}  {vs}  {ui.thermal(th, 8)}  "
-                         f"{mx.get_peak_memory() / 1e9:>4.1f} GB")
-                live.say(" " * 12 + ui.faint(ui.clip(prefix + text, ui.width() - 14)))
-                row_losses = []
+                live.say(f"{ui.clock(elapsed):>7}  {v:.3f}  " + ui.dim(ui.clip(prefix + text, ui.width() - 17)))
                 next_row += row_every
 
             if now - last_ckpt >= 600:
@@ -209,8 +230,8 @@ def run_phase(phase: str, minutes: float, peak: float, model, data: Data, tok: T
         progress["elapsed"] = time.time() - start
         save(out, model, opt, progress)
         args = [a for a in sys.argv[1:] if a not in ("--restart", "--resume")]
-        live.done(f"\n  stopped at {ui.clock(progress['elapsed'])} and saved. carry on with\n\n"
-                  f"  {ui.bold(' '.join(['python', 'train.py', *args, '--resume']))}\n")
+        live.done(f"\nstopped at {ui.clock(progress['elapsed'])}, saved. to carry on:\n"
+                  f"python train.py {' '.join(args + ['--resume'])}\n")
         raise SystemExit(130)
 
     live.done()
@@ -252,7 +273,6 @@ def main():
         if progress.get("phase") == "done":
             raise SystemExit(f"{out} is finished. talk to it with: python chat.py {out}")
 
-    print(f"\n{ui.bold('airgpt')}  {ui.dim(a.preset + ' preset')}")
     if not (data_dir / "meta.json").exists():
         from prepare import prepare
         prepare(cfg, data_dir, a.text, a.chat)
@@ -269,21 +289,19 @@ def main():
     if progress:
         model.load_weights(str(out / "model.safetensors"))
     hw = mac.info()
-    awake = mac.keep_awake()
+    mac.keep_awake()
     n = count_params(model)
     pre_min = cfg.minutes * (1 - cfg.sft_frac) if data.chat else cfg.minutes
-    chat_rows = f" · {len(data.sft_x):,} chat rows" if data.chat else ""
-    print()
-    print(ui.label("mac", f"{hw['model']} · {hw['chip']} · {hw['ram_gb']} GB"
-                   + (ui.dim(" · fanless, so expect it to slow down as it warms up") if hw["fanless"] else "")))
-    print(ui.label("model", f"{ui.num(n)} parameters · {cfg.layers} layers · width {cfg.d} · context {cfg.ctx}"))
-    print(ui.label("data", f"{ui.num(data.meta['train_tokens'])} tokens{chat_rows} · {data_dir}"))
-    print(ui.label("time", f"{cfg.minutes:.0f} min" + (f" · {pre_min:.0f} pretraining, {cfg.minutes - pre_min:.0f} chat"
-                                                        if data.chat else "")
-                   + (ui.dim(" · keeping the mac awake") if awake else "")))
-    print(ui.label("saving to", str(out)))
+    size = f"{n / 1e6:.2f}M" if n < 10e6 else f"{n / 1e6:.1f}M"
 
-    # what the samples under each row start from
+    print(f"\n{ui.bold('airgpt')} {a.preset}")
+    print(f"{hw['model']}, {hw['chip']}, {hw['ram_gb']}GB" + (" (no fan)" if hw["fanless"] else ""))
+    print(f"{size} params, {cfg.layers} layers, d={cfg.d}, ctx={cfg.ctx}")
+    print(f"{data_dir}: {ui.num(data.meta['train_tokens'])} tokens" + (f", {len(data.sft_x)} chat rows" if data.chat else ""))
+    print(f"{cfg.minutes:g} min" + (f" ({pre_min:g} pretrain + {cfg.minutes - pre_min:g} chat)" if data.chat else "")
+          + f" -> {out}")
+
+    # what the samples start from
     if isinstance(data.meta["source"], dict) and "tinystories" in data.meta["source"]:
         story = tok.encode("Once upon a time")
     else:
@@ -306,20 +324,16 @@ def main():
     summary["wall_minutes"] = round((time.time() - t0) / 60, 1)
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
 
-    p = summary["pretrain"] if "pretrain" in summary else None
-    print(f"\n{ui.green('done')}  {ui.dim(ui.clock(time.time() - t0))}\n")
-    if p:
+    print(f"\n{ui.bold('done')} in {ui.clock(time.time() - t0)}")
+    if "pretrain" in summary:
+        p = summary["pretrain"]
         bpb = p["val_loss"] / math.log(2) / data.meta["bytes_per_token"]
-        speed = f"{ui.num(p['tok_s_start'])} -> {ui.num(p['tok_s_end'])} tok/s" if p["tok_s_start"] else ""
-        print(ui.label("pretrain", f"val loss {p['val_loss']:.3f} · {bpb:.2f} bits per byte · "
-                                   f"{ui.num(p['tokens'])} tokens" + (f" · {speed}" if speed else "")))
+        speed = f", {ui.num(p['tok_s_start'])} -> {ui.num(p['tok_s_end'])} tok/s" if p["tok_s_start"] else ""
+        print(f"pretrain  val {p['val_loss']:.3f} ({bpb:.2f} bits/byte), {ui.num(p['tokens'])} tokens{speed}")
     if "chat" in summary:
-        print(ui.label("chat", f"val loss {summary['chat']['val_loss']:.3f} · {ui.num(summary['chat']['tokens'])} tokens"))
-    print(ui.label("memory", f"{summary['peak_mem_gb']} GB peak"))
-    print()
-    print(ui.label("talk to it", ui.bold(f"python chat.py {out}")))
-    print(ui.label("plot it", ui.bold(f"python plot.py {out}")))
-    print()
+        print(f"chat      val {summary['chat']['val_loss']:.3f}, {ui.num(summary['chat']['tokens'])} tokens")
+    print(f"memory    {summary['peak_mem_gb']}GB peak")
+    print(f"\npython chat.py {out}\npython plot.py {out}\n")
 
 
 if __name__ == "__main__":
