@@ -36,7 +36,7 @@ class Tokenizer:
         self.cache: dict[str, list[int]] = {}
 
     @classmethod
-    def train(cls, texts: list[str], vocab_size: int, verbose: bool = True) -> "Tokenizer":
+    def train(cls, texts: list[str], vocab_size: int, progress=None) -> "Tokenizer":
         pat = re.compile(PATTERN)
         counts = Counter(c for t in texts for c in pat.findall(t))
         words = [list(c.encode()) for c in counts]
@@ -82,8 +82,8 @@ class Tokenizer:
             for q in touched:
                 if pairs.get(q, 0) > 0:
                     heapq.heappush(heap, (-pairs[q], q))
-            if verbose and (new - 255) % 1000 == 0:
-                print(f"  tokenizer: {new - 255} merges")
+            if progress:
+                progress(new - 255, target - 256)
         return cls(merges, vocab_size)
 
     def _chunk(self, chunk: str) -> list[int]:

@@ -6,7 +6,7 @@ train your own chatbot from scratch on a mac.
 python train.py --preset hour
 ```
 
-that downloads some data, trains a tokenizer, pretrains a tiny llama-style model, teaches it to chat, then lets you talk to it. it runs for however long you tell it to, so the `hour` preset takes an hour whether you're on a macbook air or a mac studio. no cuda, no cloud, nothing on top of [mlx](https://github.com/ml-explore/mlx).
+that downloads some data, trains a tokenizer, pretrains a tiny llama-style model, teaches it to chat, then lets you talk to it. while it trains it shows a sample from the model every few minutes, so you can watch it go from gibberish to stories. it runs for however long you tell it to, so the `hour` preset takes an hour whether you're on a macbook air or a mac studio. no cuda, no cloud, nothing on top of [mlx](https://github.com/ml-explore/mlx).
 
 i made this because every "train your own llm" repo i found wanted an nvidia gpu, and i have a fanless macbook air.
 
@@ -78,7 +78,9 @@ it makes things up. 8M params is enough to learn english, not facts.
 
 sampling is cold on purpose (temperature 0.6, min-p 0.1). small models need colder sampling than big ones, which is what my current paper is about. try `--temp 0.3` and `--temp 1.0` to see the difference.
 
-it checkpoints every 10 minutes. `python train.py --preset hour --resume` carries on where it stopped, clock included.
+it keeps the mac awake while it trains, but closing the lid still puts it to sleep, so leave it open and plugged in.
+
+ctrl-c saves and prints the exact command to carry on, clock included. it also checkpoints every 10 minutes. `--restart` throws a run away and starts over.
 
 `python plot.py runs/hour` saves loss and speed over time to `runs/hour/plot.png`.
 

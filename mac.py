@@ -5,7 +5,6 @@ import platform
 import subprocess
 import sys
 
-THERMAL = {0: "nominal", 1: "fair", 2: "serious", 3: "critical"}
 _thermal_fn = None
 _thermal_failed = False
 
@@ -53,3 +52,11 @@ def thermal() -> int | None:
             _thermal_failed = True
             return None
     return int(_thermal_fn())
+
+
+def keep_awake() -> bool:
+    # caffeinate quits by itself when this process exits (-w), so nothing to clean up
+    if sys.platform != "darwin":
+        return False
+    subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())])
+    return True

@@ -1,0 +1,47 @@
+streaming pretraining data from Hugging Face: {'tinystories': 0.8, 'cosmopedia': 0.2}
+training a 2048-token BPE tokenizer on 4.0M characters
+  tokenizer: 1000 merges
+  done in 42s, 1789 merges
+val: 11,990 tokens, 3.39 bytes per token
+train: 2,474,237 tokens
+streaming chat data
+chat: 6,520 conversations packed into 6,454 rows of 128 tokens
+data ready in 1.4 min -> data/smoke
+
+MacBook Air | Apple M5 | 16 GB | fanless, expect throttling on long runs
+model: 0.7M params, 2 layers, d 128, context 128
+budget: 3 min (pretrain then chat)
+
+pretrain    0.2/2.4 min | step    822 | loss 4.178 | 168.3k tok/s | nominal | 0.19 GB
+pretrain    0.3/2.4 min | step   1821 | loss 3.276 | 204.5k tok/s | nominal | 0.19 GB
+pretrain    0.5/2.4 min | step   2794 | loss 3.073 | 199.1k tok/s | nominal | 0.19 GB
+pretrain    0.7/2.4 min | step   3750 | loss 2.966 | 195.7k tok/s | nominal | 0.19 GB
+pretrain    0.8/2.4 min | step   4743 | loss 2.903 | 203.2k tok/s | nominal | 0.19 GB
+         val loss 2.859 (1.216 bits per byte)
+pretrain    1.0/2.4 min | step   5675 | loss 2.850 | 189.7k tok/s | nominal | 0.19 GB
+pretrain    1.2/2.4 min | step   6643 | loss 2.796 | 198.1k tok/s | nominal | 0.19 GB
+pretrain    1.3/2.4 min | step   7694 | loss 2.747 | 215.2k tok/s | nominal | 0.19 GB
+pretrain    1.5/2.4 min | step   8707 | loss 2.699 | 207.3k tok/s | nominal | 0.19 GB
+pretrain    1.7/2.4 min | step   9718 | loss 2.658 | 207.0k tok/s | nominal | 0.19 GB
+pretrain    1.8/2.4 min | step  10702 | loss 2.611 | 201.4k tok/s | nominal | 0.19 GB
+         val loss 2.651 (1.127 bits per byte)
+pretrain    2.0/2.4 min | step  11696 | loss 2.581 | 202.6k tok/s (+0% vs start) | nominal | 0.19 GB
+pretrain    2.2/2.4 min | step  12674 | loss 2.555 | 200.2k tok/s (-1% vs start) | nominal | 0.19 GB
+pretrain    2.3/2.4 min | step  13677 | loss 2.536 | 205.4k tok/s (+2% vs start) | nominal | 0.19 GB
+sft         0.2/0.6 min | step    999 | loss 2.648 | 204.5k tok/s | nominal | 0.19 GB
+sft         0.3/0.6 min | step   2045 | loss 2.018 | 214.1k tok/s | nominal | 0.19 GB
+sft         0.5/0.6 min | step   3095 | loss 1.720 | 214.9k tok/s | nominal | 0.19 GB
+
+done in 3.0 min, peak memory 0.19 GB
+chat:  python chat.py runs/smoke
+plot:  python plot.py runs/smoke
+streaming pretraining data from Hugging Face: {'tinystories': 0.8, 'cosmopedia': 0.2}
+training a 8192-token BPE tokenizer on 20.0M characters
+  tokenizer: 1000 merges
+  tokenizer: 2000 merges
+  tokenizer: 3000 merges
+  tokenizer: 4000 merges
+  tokenizer: 5000 merges
+  tokenizer: 6000 merges
+  tokenizer: 7000 merges
+  done in 26s, 7933 merges

@@ -5,8 +5,9 @@ from pathlib import Path
 
 import mlx.core as mx
 
+import ui
 from config import Config
-from model import GPT
+from model import GPT, count_params
 from tokenizer import Tokenizer
 
 
@@ -49,46 +50,68 @@ def stream(model, tok, ids, ctx, args) -> list[int]:
 def main():
     ap = argparse.ArgumentParser(description="talk to a trained airgpt model")
     ap.add_argument("run", nargs="?", default="runs/hour")
-    ap.add_argument("--base", action="store_true", help="use the pretrained model before chat training (plain text continuation)")
+    ap.add_argument("--base", action="store_true", help="use the model from before chat training (continues text)")
     ap.add_argument("--prompt", help="answer one message and exit")
-    # small models need colder sampling than big ones: see the liltemp paper
+    # small models need colder sampling than big ones, see the liltemp paper
     ap.add_argument("--temp", type=float, default=0.6)
     ap.add_argument("--min-p", dest="min_p", type=float, default=0.1)
     ap.add_argument("--max", type=int, default=200, help="max new tokens per reply")
     args = ap.parse_args()
 
     run = Path(args.run)
+    if not (run / "config.json").exists():
+        raise SystemExit(f"no run in {run}. train one first: python train.py --preset smoke")
     cfg = Config(**json.loads((run / "config.json").read_text()))
     tok = Tokenizer.load(str(run / "tokenizer.json"))
     model = GPT(cfg)
-    weights = run / ("base.safetensors" if args.base else "model.safetensors")
-    model.load_weights(str(weights))
+    model.load_weights(str(run / ("base.safetensors" if args.base else "model.safetensors")))
     model.eval()
 
+    if not args.prompt:
+        try:
+            import readline  # noqa: F401  arrow keys and history in input()
+        except ImportError:
+            pass
+        kind = "base model, it continues whatever you type" if args.base else "/reset to start over · ctrl-c to quit"
+        print(f"\n{ui.bold('airgpt')}  {ui.dim(f'{run} · {ui.num(count_params(model))} parameters')}")
+        print(ui.dim(f"temperature {args.temp} · min-p {args.min_p} · {kind}\n"))
+
+    you = ui.readline_safe(ui.bold("you") + ui.dim(" › "))
+    bot = ui.cyan("airgpt") + ui.dim(" › ")
+
     if args.base:
-        prompt = args.prompt or input("start of text: ")
-        print(prompt, end="")
-        stream(model, tok, [tok.end] + tok.encode(prompt), cfg.ctx, args)
-        return
+        while True:
+            try:
+                text = args.prompt or input(you)
+            except (KeyboardInterrupt, EOFError):
+                print()
+                return
+            sys.stdout.write(bot + ui.dim(text))
+            stream(model, tok, [tok.end] + tok.encode(text), cfg.ctx, args)
+            if args.prompt:
+                return
+            print()
 
     history = [tok.end]
-    msgs = [args.prompt] if args.prompt else None
-    print(f"chatting with {run} (temp {args.temp}, min-p {args.min_p}). ctrl-c to quit, /reset to clear\n")
     while True:
         try:
-            msg = msgs.pop(0) if msgs is not None else input("you: ")
+            msg = args.prompt or input(you)
         except (KeyboardInterrupt, EOFError):
             print()
             return
         if msg.strip() == "/reset":
             history = [tok.end]
+            print(ui.dim("  (cleared)\n"))
+            continue
+        if not msg.strip():
             continue
         history += [tok.user] + tok.encode(msg) + [tok.assistant]
-        print("bot: ", end="", flush=True)
+        sys.stdout.write(bot)
         reply = stream(model, tok, history, cfg.ctx, args)
         history += reply + [tok.end]
-        if msgs is not None and not msgs:
+        if args.prompt:
             return
+        print()
 
 
 if __name__ == "__main__":
