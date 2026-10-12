@@ -27,15 +27,19 @@ def hf_stream(key: str):
         yield ex[field]
 
 
-def mixed(mix: dict, seed: int):
-    rng = random.Random(seed)
+def mixed(mix: dict):
+    # always pull from whichever source is furthest behind its share, so the mix holds by amount of text, not doc count
     streams = {k: hf_stream(k) for k in mix}
+    chars = {k: 0 for k in mix}
     while streams:
-        k = rng.choices(list(streams), [mix[k] for k in streams])[0]
+        k = min(streams, key=lambda s: chars[s] / mix[s])
         try:
-            yield next(streams[k])
+            doc = next(streams[k])
         except StopIteration:
             del streams[k]
+            continue
+        chars[k] += len(doc)
+        yield doc
 
 
 def local_text(path: str):
@@ -120,7 +124,7 @@ def pack(convos, ctx: int, end: int) -> tuple[np.ndarray, np.ndarray]:
 def prepare(cfg: Config, out: Path, text: str | None = None, chat: str | None = None, seed: int = 0) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    docs = local_text(text) if text else mixed(cfg.mix, seed)
+    docs = local_text(text) if text else mixed(cfg.mix)
     if not text:
         print(f"streaming pretraining data from Hugging Face: {cfg.mix}")
 
