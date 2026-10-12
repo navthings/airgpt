@@ -1,12 +1,34 @@
-# airgpt
+<div align="center">
 
-train a small chatbot from scratch on a mac. tokenizer, pretraining, chat finetuning, all of it, on your laptop.
+<h1>airgpt</h1>
 
-![an 8M param model writing a story](assets/story.gif)
+<p>train your own chatbot from scratch on a mac</p>
 
-^ that's an 8M param model i trained in an hour on my macbook air (m5, 16gb, no fan). it's running at normal speed.
+<img src="assets/story.gif" width="760" alt="an 8M param model writing a story">
 
-i wanted to train my own llm but everything i found (nanochat, minimind etc) needs an nvidia gpu, so i made this. it's built on [mlx](https://github.com/ml-explore/mlx) and it's around 1300 lines of python.
+<p><sub>8M params, trained for an hour on my macbook air. not sped up.</sub></p>
+
+<table>
+<tr><td></td><td><b>hour</b></td><td><b>night</b></td></tr>
+<tr><td>params</td><td>8M</td><td>40M</td></tr>
+<tr><td>time on an m5 air (16gb, no fan)</td><td>1 hour</td><td>8 hours</td></tr>
+<tr><td>val loss</td><td>2.27</td><td>training now</td></tr>
+<tr><td>speed</td><td>20k tokens/s</td><td>5k tokens/s</td></tr>
+<tr><td>memory</td><td>5.8gb</td><td>5.4gb</td></tr>
+<tr><td>throttled?</td><td>no</td><td>training now</td></tr>
+</table>
+
+</div>
+
+<br>
+
+```
+python train.py --preset hour
+```
+
+that one command downloads data, trains a tokenizer, pretrains a model, finetunes it for chat and lets you talk to it. all on your mac, built on [mlx](https://github.com/ml-explore/mlx).
+
+i made it because every "train your own llm" repo i found needed an nvidia gpu and i have a macbook air.
 
 ## running it
 
@@ -33,13 +55,7 @@ on an 8gb mac it should still work, it splits the batches up when they won't fit
 
 ## results
 
-hour preset on my air:
-
-- 8M params, 55M tokens, val loss 2.27
-- around 20k tokens/s the whole time. it didn't throttle at all, which i didn't expect
-- peaked at 5.8gb of memory
-
-it prints a sample every 2 minutes while it trains, same prompt each time. here's a few from the run:
+it prints a sample every 2 minutes while it trains, same prompt each time. here are a few from the hour run:
 
 **2 min:** Once upon a time, there was a little boy named Tim. Timmy loved to play with his friends. One day, Timmy was a very excited.
 
