@@ -30,7 +30,7 @@ PRESETS = {
     "smoke": Config(vocab=2048, d=128, layers=2, heads=4, kv_heads=2, ctx=128, batch=16, lr=2e-3,
                     minutes=3, pretrain_tokens=2_000_000, sft_convos=2_000),
     "hour": Config(),
-    "night": Config(d=512, layers=12, heads=8, kv_heads=4, ctx=1024, batch=16, lr=6e-4,
-                    minutes=480, pretrain_tokens=400_000_000, sft_convos=150_000,
+    "night": Config(d=512, layers=12, heads=8, kv_heads=4, ctx=1024, batch=4, lr=6e-4,
+                    minutes=480, pretrain_tokens=150_000_000, sft_convos=100_000,
                     mix={"tinystories": 0.5, "cosmopedia": 0.5}),
 }
