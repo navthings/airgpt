@@ -48,6 +48,13 @@ python train.py --preset hour
 python chat.py runs/hour
 ```
 
+don't want to wait? my trained models are on hugging face, [airgpt-hour](https://huggingface.co/navthings/airgpt-hour) and [airgpt-night](https://huggingface.co/navthings/airgpt-night):
+
+```
+hf download navthings/airgpt-night --local-dir runs/night
+python chat.py runs/night
+```
+
 there's also `--preset night`, a 40M model that trains for 8 hours. you can change how long any of them run with `--minutes`, the learning rate schedule stretches to fit whatever time you give it.
 
 the first run downloads tinystories and some cosmopedia from hugging face. to use different data there's `--mix`, like `--mix fineweb-edu` or `--mix tinystories=0.7,wikipedia=0.3` (also works with `cosmopedia`, `gutenberg`, or any hugging face dataset that has a text column). you can train on your own text files too with `--text ~/notes`.
