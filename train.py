@@ -12,12 +12,12 @@ import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
 import numpy as np
-from mlx.utils import tree_flatten, tree_unflatten
+from mlx.utils import tree_flatten, tree_map, tree_unflatten
 
 import mac
 import ui
 from chat import generate
-from config import PRESETS, Config
+from config import PRESETS, Config, parse_mix
 from model import GPT, count_params
 from tokenizer import Tokenizer
 
@@ -100,6 +100,32 @@ def log_line(out: Path, row: dict):
         f.write(json.dumps(row) + "\n")
 
 
+def make_step(model, opt, accum: int):
+    loss_and_grad = nn.value_and_grad(model, loss_fn)
+    state = [model.state, opt.state]
+    if accum == 1:
+        @partial(mx.compile, inputs=state, outputs=state)
+        def step(x, y, m):
+            loss, grads = loss_and_grad(model, x, y, m)
+            grads, _ = optim.clip_grad_norm(grads, 1.0)
+            opt.update(model, grads)
+            return loss
+        return step, state
+
+    # batch too big for this mac's memory: run it in pieces and add up the gradients, same update as one big batch
+    def step(x, y, m):
+        total, grads = 0.0, None
+        for xi, yi, mi in zip(*(mx.split(a, accum) for a in (x, y, m))):
+            loss, g = loss_and_grad(model, xi, yi, mi)
+            grads = g if grads is None else tree_map(mx.add, grads, g)
+            mx.eval(loss, grads)
+            total = total + loss
+        grads, _ = optim.clip_grad_norm(tree_map(lambda g: g / accum, grads), 1.0)
+        opt.update(model, grads)
+        return total / accum
+    return step, state
+
+
 class Panel:
     """The live block at the bottom: progress, numbers, a loss curve and the latest sample."""
 
@@ -140,15 +166,7 @@ def run_phase(phase: str, minutes: float, peak: float, model, data: Data, tok: T
     else:
         progress.update(phase=phase, elapsed=0.0, step=0, tokens=0)
 
-    loss_and_grad = nn.value_and_grad(model, loss_fn)
-    state = [model.state, opt.state]
-
-    @partial(mx.compile, inputs=state, outputs=state)
-    def step(x, y, m):
-        loss, grads = loss_and_grad(model, x, y, m)
-        grads, _ = optim.clip_grad_norm(grads, 1.0)
-        opt.update(model, grads)
-        return loss
+    step, state = make_step(model, opt, data.cfg.accum)
 
     name = "pretrain" if phase == "pretrain" else "chat"
     print(f"\n{ui.bold(name)}" + (ui.dim(f"  resuming at {ui.clock(progress['elapsed'])}") if progress["elapsed"] else ""))
@@ -254,6 +272,7 @@ def main():
     ap.add_argument("--data", help="data folder (default data/<preset>, made automatically if missing)")
     ap.add_argument("--text", help="pretrain on your own .txt/.md file or folder")
     ap.add_argument("--chat", help="your own chat .jsonl")
+    ap.add_argument("--mix", help="what to pretrain on, like fineweb-edu or tinystories=0.7,wikipedia=0.3")
     ap.add_argument("--out", help="run folder (default runs/<preset>)")
     ap.add_argument("--resume", action="store_true", help="continue the run in --out")
     ap.add_argument("--restart", action="store_true", help="delete the run in --out and start over")
@@ -262,8 +281,14 @@ def main():
     cfg = PRESETS[a.preset]
     if a.minutes:
         cfg.minutes = a.minutes
-    out = Path(a.out or f"runs/{a.preset}")
-    data_dir = Path(a.data or f"data/{a.preset}" + (f"-{Path(a.text).stem}" if a.text else ""))
+    suffix = ""
+    if a.mix:
+        cfg.mix = parse_mix(a.mix)
+        suffix = "-" + "+".join(k.replace("/", "_").replace(":", "_") for k in cfg.mix)
+    if a.text:
+        suffix = "-" + Path(a.text).stem
+    out = Path(a.out or f"runs/{a.preset}{suffix}")
+    data_dir = Path(a.data or f"data/{a.preset}{suffix}")
 
     if a.restart and out.exists():
         shutil.rmtree(out)
@@ -284,14 +309,16 @@ def main():
         raise SystemExit(f"{data_dir} was made for a different preset, point --data somewhere else")
 
     out.mkdir(parents=True, exist_ok=True)
-    (out / "config.json").write_text(json.dumps(cfg.to_dict(), indent=2))
     (out / "tokenizer.json").write_bytes((data_dir / "tokenizer.json").read_bytes())
     tok = Tokenizer.load(str(out / "tokenizer.json"))
 
+    hw = mac.info()
+    if not progress:
+        cfg.fit(hw["ram_gb"])
     model = GPT(cfg)
     if progress:
         model.load_weights(str(out / "model.safetensors"))
-    hw = mac.info()
+    (out / "config.json").write_text(json.dumps(cfg.to_dict(), indent=2))
     mac.keep_awake()
     n = count_params(model)
     pre_min = cfg.minutes * (1 - cfg.sft_frac) if data.chat else cfg.minutes
@@ -299,7 +326,8 @@ def main():
 
     print(f"\n{ui.bold('airgpt')} {a.preset}")
     print(f"{hw['model']}, {hw['chip']}, {hw['ram_gb']}GB" + (" (no fan)" if hw["fanless"] else ""))
-    print(f"{size} params, {cfg.layers} layers, d={cfg.d}, ctx={cfg.ctx}")
+    split = f" (in {cfg.accum} pieces of {cfg.batch // cfg.accum} to fit {hw['ram_gb']}GB)" if cfg.accum > 1 else ""
+    print(f"{size} params, {cfg.layers} layers, d={cfg.d}, ctx={cfg.ctx}, batch {cfg.batch}{split}")
     print(f"{data_dir}: {ui.num(data.meta['train_tokens'])} tokens" + (f", {len(data.sft_x)} chat rows" if data.chat else ""))
     print(f"{cfg.minutes:g} min" + (f" ({pre_min:g} pretrain + {cfg.minutes - pre_min:g} chat)" if data.chat else "")
           + f" -> {out}")

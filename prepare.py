@@ -9,23 +9,57 @@ from pathlib import Path
 import numpy as np
 
 import ui
-from config import PRESETS, Config
+from config import PRESETS, Config, parse_mix
 from tokenizer import SPECIALS, Tokenizer
 
-# name, config, split, field on the Hugging Face hub
+# name, config, split, field on the Hugging Face hub. anything else with a "/" is treated as a hub dataset with a text column
 SOURCES = {
     "tinystories": ("roneneldan/TinyStories", None, "train", "text"),
     "cosmopedia": ("HuggingFaceTB/smollm-corpus", "cosmopedia-v2", "train", "text"),
+    "fineweb-edu": ("HuggingFaceFW/fineweb-edu", "sample-10BT", "train", "text"),
+    "wikipedia": ("wikimedia/wikipedia", "20231101.en", "train", "text"),
+    "gutenberg": ("manu/project_gutenberg", None, "en", "text"),
     "everyday": ("HuggingFaceTB/everyday-conversations-llama3.1-2k", None, "train_sft", "messages"),
     "smoltalk": ("HuggingFaceTB/smol-smoltalk", None, "train", "messages"),
 }
+TEXT_SOURCES = ["tinystories", "cosmopedia", "fineweb-edu", "wikipedia", "gutenberg"]
+
+
+def check_mix(mix: dict):
+    for name in mix:
+        if name not in TEXT_SOURCES and "/" not in name:
+            raise SystemExit(f"don't know '{name}'. use one of {', '.join(TEXT_SOURCES)}, or a hugging face dataset like user/name")
+
+
+def pieces(text: str, size: int = 4000):
+    # long documents (books, big articles) get cut into ~4k character pieces on paragraph breaks
+    if len(text) <= size * 2:
+        yield text
+        return
+    buf = ""
+    for para in text.split("\n\n"):
+        buf += para + "\n\n"
+        if len(buf) > size:
+            yield buf.strip()
+            buf = ""
+    if buf.strip():
+        yield buf.strip()
 
 
 def hf_stream(key: str):
     from datasets import load_dataset
-    name, config, split, field = SOURCES[key]
+    if key in SOURCES:
+        name, config, split, field = SOURCES[key]
+    else:
+        name, _, config = key.partition(":")
+        config, split, field = config or None, "train", "text"
+    # books and unknown datasets get cut into pieces, the built-in ones stay exactly as they were for the speedrun
+    cut = key == "gutenberg" or key not in SOURCES
     for ex in load_dataset(name, config, split=split, streaming=True):
-        yield ex[field]
+        if cut:
+            yield from pieces(ex[field])
+        else:
+            yield ex[field]
 
 
 def mixed(mix: dict):
@@ -49,15 +83,7 @@ def local_text(path: str):
     if not files:
         raise SystemExit(f"no .txt or .md files found in {path}")
     for f in files:
-        # cut long files into ~4k character pieces on paragraph breaks
-        buf = ""
-        for para in f.read_text(errors="replace").split("\n\n"):
-            buf += para + "\n\n"
-            if len(buf) > 4000:
-                yield buf.strip()
-                buf = ""
-        if buf.strip():
-            yield buf.strip()
+        yield from pieces(f.read_text(errors="replace"))
 
 
 def local_chat(path: str):
@@ -155,6 +181,7 @@ def prepare(cfg: Config, out: Path, text: str | None = None, chat: str | None = 
         docs = local_text(text)
         print(f"source: {text}")
     else:
+        check_mix(cfg.mix)
         docs = mixed(cfg.mix)
         print("source: " + ", ".join(f"{k} {v:.0%}" for k, v in cfg.mix.items()) + " (hugging face)")
 
@@ -231,6 +258,10 @@ if __name__ == "__main__":
     ap.add_argument("--preset", default="hour", choices=PRESETS)
     ap.add_argument("--text", help="train on your own .txt/.md file or folder instead of the default data")
     ap.add_argument("--chat", help="your own chat data: .jsonl with {'messages': [{'role', 'content'}]} per line")
+    ap.add_argument("--mix", help="which data to pretrain on, like fineweb-edu or tinystories=0.7,wikipedia=0.3")
     ap.add_argument("--out", help="where to write (default data/<preset>)")
     a = ap.parse_args()
-    prepare(PRESETS[a.preset], Path(a.out or f"data/{a.preset}"), a.text, a.chat)
+    cfg = PRESETS[a.preset]
+    if a.mix:
+        cfg.mix = parse_mix(a.mix)
+    prepare(cfg, Path(a.out or f"data/{a.preset}"), a.text, a.chat)

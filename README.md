@@ -43,6 +43,17 @@ python chat.py runs/hour
 
 `--minutes 30` changes the time. 80% goes to pretraining and 20% to chat.
 
+pick what it learns from with `--mix`:
+
+```bash
+python train.py --preset hour --mix fineweb-edu
+python train.py --preset hour --mix tinystories=0.7,wikipedia=0.3
+```
+
+built in: `tinystories`, `cosmopedia`, `fineweb-edu`, `wikipedia`, `gutenberg`, or any hugging face dataset with a `text` column (`--mix someone/their-dataset`).
+
+got an 8gb mac? it checks your ram before it starts, and if a preset won't fit it runs each batch in smaller pieces and adds them up. same training, just slower.
+
 ## what an hour gets you
 
 on my macbook air (m5, 16gb) the `hour` preset trained an 8M parameter model on 55M tokens. every two minutes it samples the model with the same prompt, so you can watch it learn to write:
@@ -151,7 +162,7 @@ it makes things up. 8M params is enough to learn english, not facts.
 
 sampling is cold on purpose (temperature 0.6, min-p 0.1). small models need colder sampling than big ones, which is what my current paper is about. try `--temp 0.3` and `--temp 1.0` to see the difference.
 
-all three presets fit in 16gb (the hour run peaked at 5.8gb).
+all three presets fit in 16gb without splitting (the hour run peaked at 5.8gb). on 8gb the hour and night presets get split in two.
 
 it keeps the mac awake while it trains, but closing the lid still puts it to sleep, so leave it open and plugged in.
 

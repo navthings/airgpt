@@ -1,16 +1,14 @@
 import argparse
 import time
-from functools import partial
 
 import mlx.core as mx
-import mlx.nn as nn
 import mlx.optimizers as optim
 
 import mac
 import ui
 from config import PRESETS
 from model import GPT, count_params
-from train import loss_fn
+from train import make_step
 
 
 def main():
@@ -20,18 +18,12 @@ def main():
     a = ap.parse_args()
 
     cfg = PRESETS[a.preset]
+    hw = mac.info()
+    cfg.fit(hw["ram_gb"])
     model = GPT(cfg)
     opt = optim.AdamW(learning_rate=cfg.lr, betas=[0.9, 0.95], weight_decay=0.1)
     opt.init(model.trainable_parameters())
-    loss_and_grad = nn.value_and_grad(model, loss_fn)
-    state = [model.state, opt.state]
-
-    @partial(mx.compile, inputs=state, outputs=state)
-    def step(x, y, m):
-        loss, grads = loss_and_grad(model, x, y, m)
-        grads, _ = optim.clip_grad_norm(grads, 1.0)
-        opt.update(model, grads)
-        return loss
+    step, state = make_step(model, opt, cfg.accum)
 
     # random tokens, the speed doesn't care what the text says
     rows = mx.random.randint(0, cfg.vocab, (cfg.batch, cfg.ctx + 1))
@@ -39,10 +31,10 @@ def main():
     for _ in range(5):
         mx.eval(state, step(x, y, m))
 
-    hw = mac.info()
     mac.keep_awake()
     name = f"{hw['model']} ({hw['chip']}, {hw['ram_gb']}GB)"
-    print(f"\n{ui.bold('airgpt bench')} {a.preset}, {count_params(model) / 1e6:.1f}M params, {a.seconds:g}s")
+    split = f", batch in {cfg.accum} pieces to fit {hw['ram_gb']}GB" if cfg.accum > 1 else ""
+    print(f"\n{ui.bold('airgpt bench')} {a.preset}, {count_params(model) / 1e6:.1f}M params, {a.seconds:g}s{split}")
     print(name + "\n")
 
     live, windows = ui.Live(), []

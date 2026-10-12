@@ -10,6 +10,7 @@ class Config:
     kv_heads: int = 2
     ctx: int = 512
     batch: int = 32
+    accum: int = 1
     lr: float = 1e-3
     minutes: float = 60
     sft_frac: float = 0.2
@@ -22,8 +23,30 @@ class Config:
         # swiglu hidden size, ~8/3 of d rounded up to a multiple of 64
         return -(-int(8 * self.d / 3) // 64) * 64
 
+    @property
+    def gb_per_row(self) -> float:
+        # rough peak training memory per batch row, fit to real runs on an m5 air (hour 5.8gb, night 5.4gb)
+        return self.ctx * self.layers * (self.d * 131 + self.heads * self.ctx * 5.3) / 1e9
+
+    def fit(self, ram_gb: float) -> "Config":
+        # leave over half the ram for macos and everything else, split the batch until it fits
+        self.accum = 1
+        while self.batch // self.accum * self.gb_per_row > ram_gb * 0.45 and self.accum < self.batch:
+            self.accum *= 2
+        return self
+
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def parse_mix(text: str) -> dict:
+    """'tinystories=0.7,wikipedia=0.3' or just 'fineweb-edu'. weights don't have to add up to 1."""
+    mix = {}
+    for part in text.split(","):
+        name, _, w = part.strip().partition("=")
+        mix[name] = float(w) if w else 1.0
+    total = sum(mix.values())
+    return {k: v / total for k, v in mix.items()}
 
 
 PRESETS = {
