@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -35,14 +36,36 @@ def generate(model, tok: Tokenizer, ids: list[int], ctx: int, max_new: int, temp
         logits, cache = model.generate_step([t], cache)
 
 
-def stream(model, tok, ids, ctx, args) -> list[int]:
-    shown, out = "", []
+def stream(model, tok, ids, ctx, args, col: int = 0) -> list[int]:
+    # word-wrap as it streams, so words don't get cut in half at the edge of the terminal
+    width, shown, pending, out = ui.width() - 1, "", "", []
+
+    def emit(piece: str):
+        nonlocal col
+        if piece == "\n":
+            sys.stdout.write("\n")
+            col = 0
+            return
+        if col and col + len(piece) > width:
+            sys.stdout.write("\n")
+            piece, col = piece.lstrip(), 0
+        sys.stdout.write(piece)
+        sys.stdout.flush()
+        col += len(piece)
+
     for out in generate(model, tok, ids, ctx, args.max, args.temp, args.min_p):
         text = tok.decode(out)
-        if not text.endswith("�"):  # wait for the rest of a split character
-            sys.stdout.write(text[len(shown):])
-            sys.stdout.flush()
-            shown = text
+        if text.endswith("\ufffd"):  # wait for the rest of a split character
+            continue
+        pending += text[len(shown):]
+        shown = text
+        cut = max(pending.rfind(" "), pending.rfind("\n"))
+        if cut > 0:
+            for piece in re.findall(r"\n|[^\S\n]*\S+", pending[:cut]):
+                emit(piece)
+            pending = pending[cut:]
+    for piece in re.findall(r"\n|[^\S\n]*\S+", pending):
+        emit(piece)
     print()
     return out
 
@@ -86,7 +109,7 @@ def main():
                 print()
                 return
             sys.stdout.write(ui.dim(text))
-            stream(model, tok, [tok.end] + tok.encode(text), cfg.ctx, args)
+            stream(model, tok, [tok.end] + tok.encode(text), cfg.ctx, args, col=len(text))
             if args.prompt:
                 return
             print()
