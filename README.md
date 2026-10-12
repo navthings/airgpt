@@ -4,18 +4,19 @@
 
 <p>train your own chatbot from scratch on a mac</p>
 
-<img src="assets/story.gif" width="760" alt="an 8M param model writing a story">
+<img src="assets/train.gif" width="760" alt="airgpt training in the terminal">
 
-<p><sub>8M params, trained for an hour on my macbook air. not sped up.</sub></p>
+<p><sub>the hour model training for 8 minutes on my macbook air, sped up 16x</sub></p>
 
 <table>
 <tr><td></td><td><b>hour</b></td><td><b>night</b></td></tr>
 <tr><td>params</td><td>8M</td><td>40M</td></tr>
 <tr><td>time on an m5 air (16gb, no fan)</td><td>1 hour</td><td>8 hours</td></tr>
-<tr><td>val loss</td><td>2.27</td><td>training now</td></tr>
-<tr><td>speed</td><td>20k tokens/s</td><td>5k tokens/s</td></tr>
+<tr><td>tokens seen</td><td>55M</td><td>120M</td></tr>
+<tr><td>val loss (pretrain / chat)</td><td>2.27 / 2.28</td><td>2.11 / 1.62</td></tr>
+<tr><td>speed</td><td>20k tokens/s</td><td>5.3k tokens/s</td></tr>
 <tr><td>memory</td><td>5.8gb</td><td>5.4gb</td></tr>
-<tr><td>throttled?</td><td>no</td><td>training now</td></tr>
+<tr><td>throttled?</td><td>no</td><td>no, not once in 8 hours</td></tr>
 </table>
 
 </div>
@@ -63,6 +64,10 @@ it prints a sample every 2 minutes while it trains, same prompt each time. here 
 
 **46 min:** Once upon a time, there was a little girl named Lily. She loved to play with her toys and her favorite toy was a big, red ball. One day, Lily's mom asked her to help
 
+and the finished hour model writing on its own (real speed):
+
+<img src="assets/story.gif" width="760" alt="the hour model writing a story">
+
 ![loss and speed for the hour run](assets/hour.png)
 
 the chat part is pretty bad at 8M params. it says hi fine and then makes stuff up:
@@ -75,11 +80,31 @@ Hello! How can I help you today?
 The capital of france is the capital of the france of the tech of decimal.
 ```
 
-night preset results coming soon, it's training right now.
+the night model (40M, 8 hours) writes longer stories that hold together better:
+
+> Once upon a time, there was a little girl named Lily. She loved to play outside in the sun, but her mommy always told her to stay inside because it was getting dark outside. One day, Lily went outside to play with her friends. They were having so much fun that they didn't notice the sun was getting stronger and the grass started to get dark.
+
+its chat is still mostly vibes though:
+
+```
+> what is the capital of france?
+The capital of france is the capital of france.
+
+> write a poem about the sea
+Blue, a serene, serene, and serene life. The sun casts a warm, inviting light, casting a warm glow over the sea.
+```
+
+![loss and speed for the night run](assets/night.png)
+
+the air didn't throttle once in the whole 8 hours, speed was flat at about 5.3k tokens/s. the dips near the start are me using the laptop. (the night preset reads more cosmopedia than the hour one, so their val losses aren't exactly comparable.)
 
 ## bench
 
 `python bench.py` trains on random data for 2 minutes and tells you how fast your mac is. nothing to download. if you post your numbers in an issue i'll add them here.
+
+| mac | chip | memory | tok/s | after 2 min | thermal |
+|---|---|---|---|---|---|
+| macbook air | m5 | 16gb | 23.5k | +0% | nominal |
 
 ## speedrun
 
