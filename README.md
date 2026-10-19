@@ -156,8 +156,6 @@ a few other things:
 
 ## stars
 
-## Star History
-
 <a href="https://www.star-history.com/?repos=navthings%2Fairgpt&type=date&legend=top-left">
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=navthings/airgpt&type=date&theme=dark&legend=top-left" />
