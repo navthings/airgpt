@@ -153,6 +153,20 @@ a few other things:
 | `plot.py` | graphs |
 | `ui.py` | terminal output |
 
+
+## stars
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=navthings%2Fairgpt&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=navthings/airgpt&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=navthings/airgpt&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=navthings/airgpt&type=date&legend=top-left" />
+ </picture>
+</a>
+
+
 ## thanks
 
 [nanogpt](https://github.com/karpathy/nanoGPT), [nanochat](https://github.com/karpathy/nanochat) and [minimind](https://github.com/jingyaogong/minimind), which this is basically a mac version of. [tinystories](https://huggingface.co/datasets/roneneldan/TinyStories) and hugging face's smollm datasets for the data, and mlx for making it possible on a laptop.
